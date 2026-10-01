@@ -1,0 +1,21 @@
+name: topic-police-bot
+
+services:
+  bot:
+    build: .
+    image: topic-police-bot:local
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    stop_signal: SIGINT
+    stop_grace_period: 35s
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN}
+      CHAT_ID: ${CHAT_ID:?Set CHAT_ID}
+      WATCHED_USER_ID: ${WATCHED_USER_ID:?Set WATCHED_USER_ID}
+      WINDOW_MINUTES: ${WINDOW_MINUTES:?Set WINDOW_MINUTES}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
