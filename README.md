@@ -132,6 +132,78 @@ Telegram не нашёл чат, доступный боту по указанн
 При аварийной остановке между пересылкой и удалением возможен дубль:
 постоянное хранилище состояния не используется.
 
+## Тесты
+
+Базовые проверки настроек и правил переноса не обращаются к Telegram:
+
+```sh
+uv sync --locked
+uv run --no-sync python -m unittest discover -s tests -v
+```
+
+## Docker и CI/CD
+
+Push в `main` запускает `.github/workflows/deploy.yml` на сервере runner
+`ftagn-nl-l`. Один job использует GitHub Environment `prod`, собирает образ
+из `Dockerfile` и обновляет контейнер через Docker Compose на том же сервере.
+Тесты выполняются внутри сборки; финальный слой зависит от их успешного завершения.
+В образ попадают Python 3.14, зависимости из `uv.lock` и код бота, без тестов и `.env`.
+Образ `topic-police-bot:local` остаётся на сервере, публикации в registry нет.
+Для сборки нужен доступ к базовым образам Python/uv и пакетам PyPI.
+
+Один раз перед первым деплоем:
+
+1. Разреши runner доступ к этому репозиторию и назначь ему уникальную метку
+   `ftagn-nl-l` вместе с `self-hosted` и `linux`. Имя runner само по себе
+   не является меткой для `runs-on`
+   ([маршрутизация по меткам](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/use-in-a-workflow)).
+   Нужен Actions Runner версии 2.327.1 или новее для
+   [`actions/checkout@v6`](https://github.com/actions/checkout/tree/v6).
+2. Установи Docker Engine и Docker Compose 2.20+ (`docker compose`).
+   У пользователя runner должен работать `docker info` без `sudo`, а Docker
+   должен запускаться при загрузке сервера. Python и `uv` на хосте не нужны.
+3. В **Settings → Environments → prod** задай secret `BOT_TOKEN` и variables
+   `CHAT_ID`, `WATCHED_USER_ID`, `WINDOW_MINUTES` (например, `10`).
+   Все четыре значения обязательны для Compose. Если у environment включено
+   ручное approval, job будет ждать его; для автоматического деплоя разреши `main`
+   без такого ожидания.
+4. Перед первым запуском останови прежний экземпляр бота с тем же токеном,
+   если он запускался вручную или другим сервисом.
+
+Деплои выполняются последовательно; новый push не прерывает текущий job.
+Ошибка тестов, сборки или проверки настроек оставляет текущий контейнер работающим.
+Compose использует постоянное имя проекта `topic-police-bot`, поэтому повторные
+деплои заменяют его контейнер. После замены начинается полный прогрев
+`WINDOW_MINUTES`; портов и постоянных томов нет. `restart: unless-stopped`
+перезапускает бот после сбоя или перезапуска Docker. Логи ограничены 3 файлами
+по 10 МБ. Для корректной остановки Compose отправляет `SIGINT`, который обрабатывает
+`asyncio.run` в существующем коде.
+
+Для ручного запуска из корня проекта заполни `.env` по примеру выше:
+
+```sh
+docker compose config --quiet
+docker compose build --pull
+docker compose run --rm --no-deps bot python -c 'from topic_police_bot.config import Settings; Settings()'
+docker compose up --detach --no-build --wait --wait-timeout 60
+docker compose ps
+docker compose logs --tail=100 bot
+```
+
+В Actions значения передаются через окружение процесса; `.env` там не создаётся,
+секреты не передаются в build args. Не выводи `docker compose config` без `--quiet`:
+полная конфигурация содержит токен. Для ручных команд Compose тоже нужны эти
+переменные или локальный `.env`; GitHub Environment доступен только во время job.
+
+`--wait` подтверждает состояние running контейнера, но не готовность Telegram:
+HTTP healthcheck у бота нет. После первого деплоя проверь в логах
+`Long polling started` и `Observation started`, отсутствие повторных рестартов
+и работу бота после прогрева. При ошибке токена/прав исправь `prod` и повторно
+запусти последний workflow через **Actions → Deploy → Re-run jobs**.
+Для отката кода сделай `git revert` ошибочного коммита и push в `main`;
+это снова запустит тесты, сборку и деплой. Автоматического отката нет.
+Ручная остановка: `docker compose stop bot`.
+
 ## Код
 
 - `main.py` — запуск и безопасные сообщения об ошибках.

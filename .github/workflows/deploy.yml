@@ -1,0 +1,38 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: topic-police-bot-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, ftagn-nl-l]
+    environment: prod
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Test, build and deploy
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ vars.CHAT_ID }}
+          WATCHED_USER_ID: ${{ vars.WATCHED_USER_ID }}
+          WINDOW_MINUTES: ${{ vars.WINDOW_MINUTES }}
+        run: |
+          docker compose config --quiet
+          docker compose build --pull
+          docker compose run --rm --no-deps bot python -c 'from topic_police_bot.config import Settings; Settings()'
+          docker compose up --detach --no-build --wait --wait-timeout 60
+          docker compose ps
