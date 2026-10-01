@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +14,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Keep manual deployments on the same production branch as push deployments.
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, ftagn-nl-l]
     environment: prod
     timeout-minutes: 20

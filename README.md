@@ -143,8 +143,9 @@ uv run --no-sync python -m unittest discover -s tests -v
 
 ## Docker и CI/CD
 
-Push в `main` запускает `.github/workflows/deploy.yml` на сервере runner
-`ftagn-nl-l`. Один job использует GitHub Environment `prod`, собирает образ
+Push в `main` или ручной запуск через **Actions → Deploy → Run workflow**
+запускает `.github/workflows/deploy.yml` на сервере runner `ftagn-nl-l`.
+Один job использует GitHub Environment `prod`, собирает образ
 из `Dockerfile` и обновляет контейнер через Docker Compose на том же сервере.
 Тесты выполняются внутри сборки; финальный слой зависит от их успешного завершения.
 В образ попадают Python 3.14, зависимости из `uv.lock` и код бота, без тестов и `.env`.
@@ -170,7 +171,22 @@ Push в `main` запускает `.github/workflows/deploy.yml` на серве
 4. Перед первым запуском останови прежний экземпляр бота с тем же токеном,
    если он запускался вручную или другим сервисом.
 
-Деплои выполняются последовательно; новый push не прерывает текущий job.
+Чтобы пересобрать и перезапустить бота с обновлённым окружением без нового коммита:
+
+1. В **Settings → Environments → prod** обнови secret `BOT_TOKEN` и/или variables
+   `CHAT_ID`, `WATCHED_USER_ID`, `WINDOW_MINUTES`.
+2. Открой **Actions → Deploy → Run workflow**, выбери ветку `main` и нажми
+   **Run workflow**. При настроенном approval подтверди доступ к `prod`.
+3. Дождись завершения job: он выполнит сборку с тестами, проверку настроек
+   и обновление контейнера с актуальными значениями из `prod`.
+
+Кнопка появится после попадания workflow с `workflow_dispatch` в `main`;
+для запуска нужен доступ на запись в репозиторий
+([ручной запуск GitHub Actions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)).
+При выборе другой ветки job деплоя будет пропущен. Изменение значений в `prod`
+само по себе не запускает workflow.
+
+Деплои выполняются последовательно; новый push или ручной запуск не прерывает текущий job.
 Ошибка тестов, сборки или проверки настроек оставляет текущий контейнер работающим.
 Compose использует постоянное имя проекта `topic-police-bot`, поэтому повторные
 деплои заменяют его контейнер. После замены начинается полный прогрев
@@ -198,8 +214,8 @@ docker compose logs --tail=100 bot
 `--wait` подтверждает состояние running контейнера, но не готовность Telegram:
 HTTP healthcheck у бота нет. После первого деплоя проверь в логах
 `Long polling started` и `Observation started`, отсутствие повторных рестартов
-и работу бота после прогрева. При ошибке токена/прав исправь `prod` и повторно
-запусти последний workflow через **Actions → Deploy → Re-run jobs**.
+и работу бота после прогрева. При ошибке токена/прав исправь `prod` и запусти
+новый workflow через **Actions → Deploy → Run workflow** на ветке `main`.
 Для отката кода сделай `git revert` ошибочного коммита и push в `main`;
 это снова запустит тесты, сборку и деплой. Автоматического отката нет.
 Ручная остановка: `docker compose stop bot`.
